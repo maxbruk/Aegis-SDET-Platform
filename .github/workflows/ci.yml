@@ -1,0 +1,70 @@
+name: Python SDET Enterprise Automation CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  lint:
+    name: Code Quality & Linting (Ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install Dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Run Ruff Lint & Format Check
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+  test:
+    name: Full Test Automation Suite (Headless Chromium)
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install Dependencies
+        run: uv sync --frozen
+
+      - name: Install Playwright Browsers & OS Dependencies
+        run: uv run playwright install --with-deps chromium
+
+      - name: Run Pytest Test Suite
+        run: |
+          uv run pytest -n 2 -v --html=reports/report.html --self-contained-html --alluredir=reports/allure-results
+
+      - name: Upload HTML Test Report & Visual Baselines
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdet-test-reports
+          path: |
+            reports/report.html
+            reports/allure-results/
+            reports/artifacts/visual_baselines/
+          retention-days: 14

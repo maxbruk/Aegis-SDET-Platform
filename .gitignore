@@ -1,0 +1,23 @@
+# Python virtual environments & build artifacts
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+
+# Pytest & Test Reports
+.pytest_cache/
+reports/*.html
+reports/allure-results/
+reports/allure-report/
+reports/artifacts/*
+!reports/artifacts/visual_baselines/
+*.webm
+*.zip
+
+# Environment Variables
+.env
+
+# Notes
+notes/

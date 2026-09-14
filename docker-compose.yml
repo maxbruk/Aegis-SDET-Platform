@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  sdet-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sdet-automation-runner
+    environment:
+      - HEADLESS=true
+      - BASE_URL=http://storefront:8080
+      - API_URL=http://backend:3000
+    volumes:
+      - ./reports:/app/reports
+    command: ["uv", "run", "pytest", "-n", "4", "-v"]
+
+  storefront:
+    image: python:3.12-slim
+    container_name: sdet-storefront-ui
+    working_dir: /app
+    volumes:
+      - ./frontend:/app/frontend
+    command: ["python", "-m", "http.server", "8080", "--directory", "frontend"]
+    ports:
+      - "5173:8080"
