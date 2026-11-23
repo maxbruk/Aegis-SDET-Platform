@@ -38,7 +38,7 @@
   --accent: #2563eb;
   --accent-hover: #1d4ed8;
 
-  --success: #16a34a;
+  --success: #15803d;
   --success-bg: #f0fdf4;
   --success-border: #bbf7d0;
 
@@ -46,7 +46,7 @@
   --danger-bg: #fef2f2;
   --danger-border: #fecaca;
 
-  --warning: #d97706;
+  --warning: #b45309;
   --warning-bg: #fffbeb;
   --warning-border: #fde68a;
 
@@ -1080,7 +1080,7 @@ body {
   font-family: var(--font-sans);
   font-size: 0.8125rem;
   font-weight: 600;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: all 0.15s ease;

@@ -174,7 +174,7 @@
 
   <!-- Slide-Over Cart Drawer -->
   <div id="cart-drawer-overlay" class="drawer-overlay hidden" data-testid="cart-drawer-overlay"></div>
-  <aside id="cart-drawer" class="cart-drawer" data-testid="cart-drawer" aria-label="Shopping Cart Drawer">
+  <div id="cart-drawer" class="cart-drawer" data-testid="cart-drawer" role="dialog" aria-modal="true" aria-label="Shopping Cart Drawer">
     <div class="drawer-header">
       <div class="drawer-title-group">
         <h2 class="drawer-title">Shopping Cart</h2>
@@ -232,13 +232,13 @@
         <button id="clear-cart-btn" class="btn btn-ghost btn-sm btn-block text-muted" data-testid="clear-cart-btn">Clear All Items</button>
       </div>
     </div>
-  </aside>
+  </div>
 
   <!-- Checkout Modal -->
-  <div id="checkout-modal" class="modal-backdrop hidden" data-testid="checkout-modal">
+  <div id="checkout-modal" class="modal-backdrop hidden" data-testid="checkout-modal" role="dialog" aria-modal="true" aria-labelledby="checkout-modal-title">
     <div class="modal-card modal-lg">
       <div class="modal-header">
-        <h2 class="modal-title">Complete Your Order</h2>
+        <h2 id="checkout-modal-title" class="modal-title">Complete Your Order</h2>
         <button id="checkout-close-btn" class="close-btn" data-testid="checkout-close-btn" aria-label="Close modal">×</button>
       </div>
 
@@ -352,7 +352,7 @@
   </div>
 
   <!-- Auth Modal (Sign In / Register) -->
-  <div id="auth-modal" class="modal-backdrop hidden" data-testid="auth-modal">
+  <div id="auth-modal" class="modal-backdrop hidden" data-testid="auth-modal" role="dialog" aria-modal="true" aria-label="Account Authentication">
     <div class="modal-card">
       <div class="modal-header">
         <div class="tab-group" data-testid="auth-tabs">
@@ -403,10 +403,10 @@
   </div>
 
   <!-- Admin Inventory Management Modal -->
-  <div id="admin-modal" class="modal-backdrop hidden" data-testid="admin-modal">
+  <div id="admin-modal" class="modal-backdrop hidden" data-testid="admin-modal" role="dialog" aria-modal="true" aria-labelledby="admin-modal-title">
     <div class="modal-card modal-lg">
       <div class="modal-header">
-        <h2 class="modal-title">Inventory Management (Admin RBAC)</h2>
+        <h2 id="admin-modal-title" class="modal-title">Inventory Management (Admin RBAC)</h2>
         <button id="admin-close-btn" class="close-btn" data-testid="admin-close-btn" aria-label="Close admin modal">×</button>
       </div>
       <div class="modal-body">

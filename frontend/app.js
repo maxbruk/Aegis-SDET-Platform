@@ -15,7 +15,8 @@
 
 // Default Configuration
 const CONFIG = {
-  API_BASE_URL: window.AEGIS_API_URL || window.APEX_API_URL || 'http://127.0.0.1:3000',
+  API_BASE_URL: window.AEGIS_API_URL || 'http://127.0.0.1:3000',
+  ALLOW_OFFLINE_MOCK: Boolean(window.AEGIS_ALLOW_OFFLINE_MOCK),
   TAX_RATE: 0.08,
   POLL_INTERVAL_MS: 4000,
 };
@@ -104,8 +105,8 @@ if (document.readyState === 'loading') {
 }
 
 function initState() {
-  // Restore User from LocalStorage or Cookies
-  const savedUser = localStorage.getItem('aegis_user') || localStorage.getItem('apex_user');
+  // Restore User from LocalStorage
+  const savedUser = localStorage.getItem('aegis_user');
   if (savedUser) {
     try {
       state.user = JSON.parse(savedUser);
@@ -115,7 +116,7 @@ function initState() {
   }
 
   // Restore Cart from LocalStorage
-  const savedCart = localStorage.getItem('aegis_cart') || localStorage.getItem('apex_cart');
+  const savedCart = localStorage.getItem('aegis_cart');
   if (savedCart) {
     try {
       state.cart = JSON.parse(savedCart);
@@ -125,7 +126,7 @@ function initState() {
   }
 
   // Restore Products from LocalStorage if mutated
-  const stored = localStorage.getItem('aegis_mock_products') || localStorage.getItem('apex_mock_products');
+  const stored = localStorage.getItem('aegis_mock_products');
   if (stored) {
     try {
       state.products = JSON.parse(stored);
@@ -268,9 +269,7 @@ async function syncLiveProducts() {
       saveCart();
       renderCart();
       renderCheckoutReview();
-      if (!document.querySelector(`[data-product-id="${productList[0].id}"]`)) {
-        renderCatalog();
-      }
+      renderCatalog();
     }
 
     if (!state.isApiReachable) {
@@ -497,7 +496,7 @@ function renderCatalog() {
           </svg>
         </div>
         <div class="card-body">
-          <h3 class="product-title" data-testid="product-title">${escapeHtml(product.name)}</h3>
+          <h2 class="product-title" data-testid="product-title">${escapeHtml(product.name)}</h2>
           <p class="product-desc" data-testid="product-description">${escapeHtml(product.description || '')}</p>
           <div class="card-footer">
             <div class="price-group">
@@ -589,12 +588,33 @@ function updateCartItemQty(productId, delta) {
 
   saveCart();
   renderCart();
+
+  if (state.user && state.user.token && state.isApiReachable) {
+    const newQty = item.quantity <= 0 ? 0 : item.quantity;
+    fetch(`${CONFIG.API_BASE_URL}/api/v1/cart/items/${productId}`, {
+      method: newQty <= 0 ? 'DELETE' : 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${state.user.token}`
+      },
+      ...(newQty > 0 ? { body: JSON.stringify({ quantity: newQty }) } : {})
+    }).catch(() => {});
+  }
 }
 
 function removeCartItem(productId) {
   state.cart = state.cart.filter(i => i.productId !== productId);
   saveCart();
   renderCart();
+
+  if (state.user && state.user.token && state.isApiReachable) {
+    fetch(`${CONFIG.API_BASE_URL}/api/v1/cart/items/${productId}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${state.user.token}`
+      }
+    }).catch(() => {});
+  }
 }
 
 function clearCart() {
@@ -602,11 +622,19 @@ function clearCart() {
   saveCart();
   renderCart();
   showToast('Shopping cart cleared', 'success');
+
+  if (state.user && state.user.token && state.isApiReachable) {
+    fetch(`${CONFIG.API_BASE_URL}/api/v1/cart`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${state.user.token}`
+      }
+    }).catch(() => {});
+  }
 }
 
 function saveCart() {
   localStorage.setItem('aegis_cart', JSON.stringify(state.cart));
-  localStorage.setItem('apex_cart', JSON.stringify(state.cart));
 }
 
 function getCartCalculations() {
@@ -646,7 +674,7 @@ function renderCart() {
       itemsList.innerHTML = state.cart.map(item => `
         <div class="cart-item" data-testid="cart-item" data-product-id="${item.productId}">
           <div class="cart-item-info">
-            <h4 class="cart-item-name" data-testid="cart-item-title">${escapeHtml(item.name)}</h4>
+            <h3 class="cart-item-name" data-testid="cart-item-title">${escapeHtml(item.name)}</h3>
             <div class="cart-item-price" data-testid="cart-item-price">$${item.price.toFixed(2)} each</div>
           </div>
           <div class="qty-stepper">
@@ -789,8 +817,8 @@ async function handlePlaceOrder() {
     }
   } catch (err) {
     const isConnRefused = err.name === 'TypeError' || (err.message && err.message.toLowerCase().includes('failed to fetch'));
-    if (isConnRefused && !state.isApiReachable) {
-      // Local Mock fallback execution
+    if (isConnRefused && CONFIG.ALLOW_OFFLINE_MOCK && !state.isApiReachable) {
+      // Explicit offline demo fallback when AEGIS_ALLOW_OFFLINE_MOCK is enabled
       const mockOrderRef = 'ORD-' + Math.floor(100000 + Math.random() * 900000);
       displayOrderSuccess(mockOrderRef, total);
       return;
@@ -918,8 +946,8 @@ async function handleLogin() {
     }
   } catch (err) {
     const isConnRefused = err.name === 'TypeError' || (err.message && err.message.toLowerCase().includes('failed to fetch'));
-    if (isConnRefused && !state.isApiReachable) {
-      // Local Mock Login
+    if (isConnRefused && CONFIG.ALLOW_OFFLINE_MOCK && !state.isApiReachable) {
+      // Explicit offline demo login when AEGIS_ALLOW_OFFLINE_MOCK is enabled
       state.user = {
         id: 101,
         name: email.split('@')[0],
@@ -973,11 +1001,12 @@ async function handleRegister() {
 
     if (res.ok || res.status === 201) {
       const data = await res.json();
+      const userObj = data.user || data;
       state.user = {
-        id: data.id || data.user?.id || 102,
-        name: data.username || data.name || name,
-        email: data.email || email,
-        role: data.role || 'customer',
+        id: userObj.id || 102,
+        name: userObj.name || userObj.username || name,
+        email: userObj.email || email,
+        role: userObj.role || 'customer',
         token: data.token || 'jwt-new-user-token'
       };
       saveUserSession();
@@ -995,8 +1024,8 @@ async function handleRegister() {
     }
   } catch (err) {
     const isConnRefused = err.name === 'TypeError' || (err.message && err.message.toLowerCase().includes('failed to fetch'));
-    if (isConnRefused && !state.isApiReachable) {
-      // Local Mock Register
+    if (isConnRefused && CONFIG.ALLOW_OFFLINE_MOCK && !state.isApiReachable) {
+      // Explicit offline demo registration when AEGIS_ALLOW_OFFLINE_MOCK is enabled
       state.user = {
         id: 102,
         name: name,
@@ -1021,8 +1050,6 @@ async function handleRegister() {
 function saveUserSession() {
   if (state.user) {
     localStorage.setItem('aegis_user', JSON.stringify(state.user));
-    localStorage.setItem('apex_user', JSON.stringify(state.user));
-    document.cookie = `apex_token=${state.user.token}; path=/; max-age=86400; SameSite=Lax`;
     document.cookie = `aegis_token=${state.user.token}; path=/; max-age=86400; SameSite=Lax`;
   }
 }
@@ -1030,8 +1057,6 @@ function saveUserSession() {
 function handleLogout() {
   state.user = null;
   localStorage.removeItem('aegis_user');
-  localStorage.removeItem('apex_user');
-  document.cookie = 'apex_token=; path=/; max-age=0; SameSite=Lax';
   document.cookie = 'aegis_token=; path=/; max-age=0; SameSite=Lax';
   renderAuthUI();
   showToast('Signed out successfully', 'success');
@@ -1091,20 +1116,20 @@ function renderAdminInventoryTable() {
   if (!tbody) return;
 
   tbody.innerHTML = state.products.map(p => `
-    <tr>
+    <tr data-testid="admin-product-row" data-product-id="${p.id}">
       <td class="font-mono text-xs">${p.id}</td>
       <td class="font-semibold">${escapeHtml(p.name)}</td>
       <td><span class="badge">${escapeHtml(p.category)}</span></td>
       <td class="font-mono">$${p.price.toFixed(2)}</td>
       <td class="font-mono">${p.stock}</td>
       <td>
-        <button class="btn btn-ghost btn-sm text-danger" onclick="handleAdminDeleteProduct(${p.id})">Delete</button>
+        <button class="btn btn-ghost btn-sm text-danger" data-testid="admin-delete-product-btn" onclick="handleAdminDeleteProduct(${p.id})">Delete</button>
       </td>
     </tr>
   `).join('');
 }
 
-function handleAdminCreateProduct() {
+async function handleAdminCreateProduct() {
   const name = (document.getElementById('admin-product-name')?.value || '').trim();
   const price = parseFloat(document.getElementById('admin-product-price')?.value || 0);
   const stock = parseInt(document.getElementById('admin-product-stock')?.value || 0, 10);
@@ -1116,9 +1141,7 @@ function handleAdminCreateProduct() {
     return;
   }
 
-  const newId = Math.max(...state.products.map(p => p.id), 0) + 1;
-  const newProd = {
-    id: newId,
+  const payload = {
     name,
     category,
     price,
@@ -1126,23 +1149,93 @@ function handleAdminCreateProduct() {
     description: desc || 'Admin-provisioned catalog product.'
   };
 
+  let createdProduct = null;
+  if (!state.user || !state.user.token) {
+    if (!CONFIG.ALLOW_OFFLINE_MOCK) {
+      showToast('Admin authentication required to create products.', 'error');
+      return;
+    }
+  } else {
+    try {
+      const res = await fetch(`${CONFIG.API_BASE_URL}/api/v1/products`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${state.user.token}`
+        },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok || res.status === 201) {
+        createdProduct = await res.json();
+      } else {
+        let errMsg = 'Failed to create product.';
+        try {
+          const errData = await res.json();
+          errMsg = errData.error || errMsg;
+        } catch (e) {}
+        showToast(errMsg, 'error');
+        return;
+      }
+    } catch (err) {
+      const isConnRefused = err.name === 'TypeError' || (err.message && err.message.toLowerCase().includes('failed to fetch'));
+      if (!isConnRefused || !CONFIG.ALLOW_OFFLINE_MOCK) {
+        showToast(err.message || 'Failed to create product.', 'error');
+        return;
+      }
+    }
+  }
+
+  const newId = createdProduct?.id || (Math.max(...state.products.map(p => p.id), 0) + 1);
+  const newProd = createdProduct ? {
+    id: newId,
+    name: createdProduct.name || payload.name,
+    category: createdProduct.category || payload.category,
+    price: typeof createdProduct.price === 'number' ? createdProduct.price : payload.price,
+    stock: typeof createdProduct.stock === 'number' ? createdProduct.stock : payload.stock,
+    description: createdProduct.description || payload.description
+  } : { id: newId, ...payload };
+
   state.products.push(newProd);
   localStorage.setItem('aegis_mock_products', JSON.stringify(state.products));
-  localStorage.setItem('apex_mock_products', JSON.stringify(state.products));
 
   renderCatalog();
   renderAdminInventoryTable();
-  showToast(`Product "${name}" added to inventory`, 'success');
+  showToast(`Product "${newProd.name}" added to inventory`, 'success');
 
   // Reset form
   const form = document.getElementById('admin-create-form');
   if (form) form.reset();
 }
 
-function handleAdminDeleteProduct(productId) {
+async function handleAdminDeleteProduct(productId) {
+  if (!state.user || !state.user.token) {
+    if (!CONFIG.ALLOW_OFFLINE_MOCK) {
+      showToast('Admin authentication required to delete products.', 'error');
+      return;
+    }
+  } else {
+    try {
+      const res = await fetch(`${CONFIG.API_BASE_URL}/api/v1/products/${productId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${state.user.token}`
+        }
+      });
+      if (!res.ok && res.status !== 404) {
+        showToast('Failed to delete product from API', 'error');
+        return;
+      }
+    } catch (err) {
+      const isConnRefused = err.name === 'TypeError' || (err.message && err.message.toLowerCase().includes('failed to fetch'));
+      if (!isConnRefused || !CONFIG.ALLOW_OFFLINE_MOCK) {
+        showToast(err.message || 'Failed to delete product.', 'error');
+        return;
+      }
+    }
+  }
+
   state.products = state.products.filter(p => p.id !== productId);
   localStorage.setItem('aegis_mock_products', JSON.stringify(state.products));
-  localStorage.setItem('apex_mock_products', JSON.stringify(state.products));
 
   renderCatalog();
   renderAdminInventoryTable();
@@ -1159,6 +1252,8 @@ function showToast(msg, type = 'success') {
 
   const toast = document.createElement('div');
   toast.className = `toast toast-${type}`;
+  toast.setAttribute('data-testid', 'toast');
+  toast.setAttribute('role', 'status');
   toast.innerHTML = `
     <span>${escapeHtml(msg)}</span>
   `;
