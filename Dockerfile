@@ -1,30 +1,31 @@
-# Use official Microsoft Playwright Python base image with all system dependencies
-FROM mcr.microsoft.com/playwright/python:v1.45.0-jammy
+# Python 3.12 slim base matching requires-python >=3.12
+FROM python:3.12-slim
 
-# Set working directory
 WORKDIR /app
 
-# Install uv for ultra-fast dependency management
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+# Install uv for deterministic dependency management
+COPY --from=ghcr.io/astral-sh/uv:0.12.23 /uv /bin/uv
 
 # Copy project definition, lockfile, and readme needed by build backend
-COPY pyproject.toml uv.lock* README.md* ./
+COPY pyproject.toml uv.lock README.md ./
 
-# Install dependencies using uv (pre-install dependencies without local package for optimal layer caching)
-RUN uv sync --frozen --no-install-project || uv sync --no-install-project
+# Install locked dependencies strictly without fallback
+RUN uv sync --frozen --no-install-project
 
-# Install Playwright browser binaries
-RUN uv run playwright install chromium
+# Install libatomic1 needed by Playwright's bundled Node runtime on slim images, then Chromium + OS deps
+RUN apt-get update && apt-get install -y --no-install-recommends libatomic1 && rm -rf /var/lib/apt/lists/*
+RUN uv run playwright install --with-deps chromium
 
-# Copy entire repository source, tests, and storefront
-COPY . .
+# Copy repository source, tests, baselines, and storefront
+COPY framework ./framework
+COPY frontend ./frontend
+COPY tests ./tests
+COPY reports/artifacts/visual_baselines ./reports/artifacts/visual_baselines
 
-# Install local framework package
-RUN uv sync --frozen || uv sync
+# Install local framework package strictly from lockfile
+RUN uv sync --frozen
 
-# Set environment variables for headless container runs
 ENV HEADLESS=true
 ENV PYTHONUNBUFFERED=1
 
-# Default execution command
 CMD ["uv", "run", "pytest", "-n", "4", "-v"]

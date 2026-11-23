@@ -46,7 +46,7 @@ AEGIS Platform                          System Under Test (SUT)
 │   ├── conftest.py         (xdist AEGIS_RUN_ID propagation & lifecycle/failure hooks)
 │   ├── fixtures/           (server, browser, authentication, api, quality_tools)
 │   ├── support/            (mock_routes, test_data, artifact_helpers)
-│   └── {unit,api,ui,integration,concurrency,e2e,resilience,performance,visual,a11y}/  (90 collected tests)
+│   └── {unit,api,ui,integration,concurrency,e2e,resilience,performance,visual,a11y}/  (97 collected tests)
 └── monitoring/             (Prometheus config, Grafana datasources & dashboards: aegis-quality-overview, aegis-sut-telemetry)
 ```
 

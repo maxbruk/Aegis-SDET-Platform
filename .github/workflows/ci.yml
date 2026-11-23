@@ -1,14 +1,17 @@
-name: Python SDET Enterprise Automation CI
+name: AEGIS Quality Engineering CI Pipeline
 
 on:
   push:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
 
 jobs:
-  lint:
-    name: Code Quality & Linting (Ruff)
+  static-analysis:
+    name: Static Analysis, Lockfile & Security Checks
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Codebase
@@ -17,24 +20,49 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v2
         with:
-          version: "latest"
+          version: "0.12.23"
           enable-cache: true
 
       - name: Set up Python 3.12
         run: uv python install 3.12
 
-      - name: Install Dependencies
-        run: uv sync --frozen --extra dev
+      - name: Verify Lockfile and Install Dependencies
+        run: |
+          uv lock --check
+          uv sync --frozen --extra dev
 
       - name: Run Ruff Lint & Format Check
         run: |
           uv run ruff check .
           uv run ruff format --check .
 
-  test:
-    name: Full Test Automation Suite (Headless Chromium)
+      - name: Run Static Type Check (mypy)
+        run: uv run mypy framework tests
+
+      - name: Set up Go 1.22 and Vet Backend
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Go Vet & Build Check
+        working-directory: backend
+        run: |
+          go vet ./...
+          go build -o /tmp/aegis-backend .
+
+      - name: Dependency Vulnerability Scan
+        run: |
+          uv export --frozen --no-hashes --no-emit-project -o /tmp/requirements-audit.txt
+          uvx pip-audit --progress-spinner off -r /tmp/requirements-audit.txt
+
+  unit-tests:
+    name: Framework Unit & Contract Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
-    needs: lint
+    needs: static-analysis
+    if: github.event_name != 'schedule'
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [ "3.12", "3.13" ]
     steps:
       - name: Checkout Codebase
         uses: actions/checkout@v4
@@ -42,29 +70,196 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v2
         with:
-          version: "latest"
+          version: "0.12.23"
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install Locked Dependencies
+        run: uv sync --frozen
+
+      - name: Run Unit & Contract Tests
+        run: uv run pytest -m unit -v --junitxml=reports/junit-unit.xml
+
+      - name: Upload Unit Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aegis-unit-py${{ matrix.python-version }}
+          path: |
+            reports/junit-unit.xml
+            reports/report.html
+            reports/runs/
+          retention-days: 14
+
+  ui-mocked:
+    name: Mocked UI, Resilience, Performance & Accessibility Suites
+    runs-on: ubuntu-latest
+    needs: static-analysis
+    if: github.event_name != 'schedule'
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+        with:
+          version: "0.12.23"
           enable-cache: true
 
       - name: Set up Python 3.12
         run: uv python install 3.12
 
-      - name: Install Dependencies
-        run: uv sync --frozen
-
-      - name: Install Playwright Browsers & OS Dependencies
-        run: uv run playwright install --with-deps chromium
-
-      - name: Run Pytest Test Suite
+      - name: Install Locked Dependencies & Chromium
         run: |
-          uv run pytest -n 2 -v --html=reports/report.html --self-contained-html --alluredir=reports/allure-results
+          uv sync --frozen
+          uv run playwright install --with-deps chromium
 
-      - name: Upload HTML Test Report & Visual Baselines
+      - name: Run Mocked UI, Chaos, Performance, and A11y Suites
+        run: |
+          uv run pytest -m "ui_mocked or resilience or performance or a11y" -n 2 -v --junitxml=reports/junit-ui-mocked.xml
+
+      - name: Upload UI & Failure Artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sdet-test-reports
+          name: aegis-ui-mocked-artifacts
           path: |
+            reports/junit-ui-mocked.xml
             reports/report.html
             reports/allure-results/
-            reports/artifacts/visual_baselines/
+            reports/runs/
+            reports/reliability/
           retention-days: 14
+
+  integration-and-e2e:
+    name: Full-Stack Integration, Concurrency & E2E (Go + PostgreSQL)
+    runs-on: ubuntu-latest
+    needs: static-analysis
+    if: github.event_name != 'schedule'
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: aegis
+          POSTGRES_PASSWORD: aegis_password
+          POSTGRES_DB: aegis_store
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aegis -d aegis_store"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Set up Go 1.22
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Build and Start Go Backend
+        working-directory: backend
+        env:
+          PORT: "3000"
+          DATABASE_URL: "postgres://aegis:aegis_password@127.0.0.1:5432/aegis_store?sslmode=disable"
+          JWT_SECRET: "ci-jwt-secret"
+        run: |
+          mkdir -p ../reports
+          go build -o /tmp/aegis-backend .
+          nohup /tmp/aegis-backend > ../reports/backend.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:3000/health; then
+              echo "Go backend is healthy"
+              exit 0
+            fi
+            sleep 1
+          done
+          cat ../reports/backend.log
+          exit 1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+        with:
+          version: "0.12.23"
+          enable-cache: true
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install Locked Dependencies & Chromium
+        run: |
+          uv sync --frozen
+          uv run playwright install --with-deps chromium
+
+      - name: Run Integration, Concurrency, and Full-Stack E2E Suites
+        env:
+          REQUIRE_BACKEND: "true"
+          API_URL: "http://127.0.0.1:3000"
+          ENVIRONMENT: "ci"
+        run: |
+          uv run pytest -m "integration or e2e or concurrency" -n 2 -v --junitxml=reports/junit-integration.xml
+
+      - name: Generate Reliability Dashboard
+        if: always()
+        run: uv run aegis reliability
+
+      - name: Upload Integration & Reliability Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aegis-integration-artifacts
+          path: |
+            reports/junit-integration.xml
+            reports/backend.log
+            reports/report.html
+            reports/allure-results/
+            reports/runs/
+            reports/reliability/
+          retention-days: 14
+
+  nightly-full-regression:
+    name: Nightly Visual & Performance Telemetry Regression
+    runs-on: ubuntu-latest
+    needs: static-analysis
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+        with:
+          version: "0.12.23"
+          enable-cache: true
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install Locked Dependencies & Chromium
+        run: |
+          uv sync --frozen
+          uv run playwright install --with-deps chromium
+
+      - name: Run Visual & Performance Suites
+        env:
+          ENVIRONMENT: "nightly"
+        run: |
+          uv run pytest -m "visual or performance" -v --junitxml=reports/junit-nightly.xml
+          uv run aegis reliability
+
+      - name: Upload Nightly Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aegis-nightly-artifacts
+          path: |
+            reports/junit-nightly.xml
+            reports/report.html
+            reports/runs/
+            reports/reliability/
+            reports/artifacts/
+          retention-days: 30

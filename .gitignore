@@ -8,9 +8,13 @@ build/
 
 # Pytest & Test Reports
 .pytest_cache/
+.mypy_cache/
 reports/*.html
+reports/*.xml
 reports/allure-results/
 reports/allure-report/
+reports/runs/
+reports/reliability/
 reports/artifacts/*
 !reports/artifacts/visual_baselines/
 *.webm

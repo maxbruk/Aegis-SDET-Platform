@@ -1,0 +1,25 @@
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+
+  - name: PostgreSQL
+    type: postgres
+    uid: postgres
+    access: proxy
+    url: db:5432
+    user: aegis
+    secureJsonData:
+      password: aegis_password
+    jsonData:
+      database: aegis_store
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: false
+    editable: true

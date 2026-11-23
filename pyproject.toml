@@ -1,9 +1,9 @@
 [project]
 name = "sdet-enterprise-framework"
 version = "1.0.0"
-description = "Enterprise-Grade Python SDET Test Automation Platform & Storefront"
+description = "AEGIS Quality Engineering & Test Infrastructure Platform"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 authors = [
     { name = "Max Bruk" }
 ]
@@ -25,7 +25,11 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "ruff>=0.4.9",
+    "mypy>=1.10.0",
 ]
+
+[project.scripts]
+aegis = "framework.execution.cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -37,24 +41,38 @@ packages = ["framework"]
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
-addopts = "-v --html=reports/report.html --self-contained-html --alluredir=reports/allure-results"
+addopts = "-v --html=reports/report.html --self-contained-html --alluredir=reports/allure-results --clean-alluredir"
 markers = [
-    "api: API integration and contract tests",
-    "ui: End-to-end user interface tests",
+    "unit: Framework unit and schema validation tests",
+    "api: API contract and HTTP endpoint tests",
+    "ui_mocked: UI tests with deterministic mocked backend routes",
+    "ui: General user interface tests",
+    "integration: Real backend and PostgreSQL integration tests",
+    "concurrency: Backend concurrency, idempotency, and race condition tests",
+    "e2e: Full end-to-end tests across Storefront UI, Go Backend, and PostgreSQL",
     "resilience: Chaos and network fault injection tests",
     "performance: Core Web Vitals and CDP telemetry tests",
     "visual: Pixel-level visual regression tests",
-    "a11y: Automated WCAG 2.1 AA accessibility tests",
+    "a11y: Automated accessibility tests",
     "smoke: Critical path smoke tests",
     "slow: Tests with network or browser delays",
 ]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-filterwarnings = [
-    "ignore::DeprecationWarning",
-]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "S110", "BLE001"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+explicit_package_bases = true
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = true
+no_implicit_optional = true

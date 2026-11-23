@@ -1,25 +1,117 @@
-version: '3.8'
-
 services:
-  sdet-runner:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: sdet-automation-runner
+  db:
+    image: postgres:16-alpine
+    container_name: aegis-postgres
     environment:
-      - HEADLESS=true
-      - BASE_URL=http://storefront:8080
-      - API_URL=http://backend:3000
+      POSTGRES_USER: aegis
+      POSTGRES_PASSWORD: aegis_password
+      POSTGRES_DB: aegis_store
+    ports:
+      - "5432:5432"
     volumes:
-      - ./reports:/app/reports
-    command: ["uv", "run", "pytest", "-n", "4", "-v"]
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aegis -d aegis_store"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: aegis-go-backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: "3000"
+      DATABASE_URL: "postgres://aegis:aegis_password@db:5432/aegis_store?sslmode=disable"
+      JWT_SECRET: "aegis-docker-jwt-secret"
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
 
   storefront:
     image: python:3.12-slim
-    container_name: sdet-storefront-ui
+    container_name: aegis-storefront-ui
     working_dir: /app
     volumes:
-      - ./frontend:/app/frontend
+      - ./frontend:/app/frontend:ro
     command: ["python", "-m", "http.server", "8080", "--directory", "frontend"]
     ports:
       - "5173:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: aegis-prometheus
+    depends_on:
+      backend:
+        condition: service_healthy
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: aegis-grafana
+    depends_on:
+      db:
+        condition: service_healthy
+      prometheus:
+        condition: service_started
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+      GF_THEME_DEFAULT: "dark"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3001:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aegis-test-runner
+    depends_on:
+      db:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+      storefront:
+        condition: service_healthy
+    environment:
+      HEADLESS: "true"
+      BASE_URL: "http://storefront:8080"
+      API_URL: "http://backend:3000"
+      REQUIRE_BACKEND: "true"
+    volumes:
+      - ./reports/runs:/app/reports/runs
+      - ./reports/allure-results:/app/reports/allure-results
+    command: ["uv", "run", "pytest", "-n", "4", "-v"]
+
+volumes:
+  postgres_data:
