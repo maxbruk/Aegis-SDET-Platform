@@ -18,6 +18,7 @@ from framework.api.models.order_models import CheckoutRequest, OrderResponse
 
 @allure.epic("API Contracts & Validation")
 @allure.feature("Order Checkout & Idempotency Schemas")
+@pytest.mark.unit
 @pytest.mark.api
 class TestOrdersAPIContract:
     """Contract tests for Order checkout and Idempotency schemas."""
@@ -51,7 +52,7 @@ class TestOrdersAPIContract:
                 "idempotency_key": "idem-uuid-test-1234",
                 "created_at": "2026-08-30T12:00:00Z",
             }
-            order = OrderResponse(**raw_order)
+            order = OrderResponse.model_validate(raw_order)
             assert order.order_id == "ORD-998811"
             assert order.status == "COMPLETED"
             assert order.total_amount == 161.99

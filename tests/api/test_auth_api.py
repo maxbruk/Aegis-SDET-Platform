@@ -18,11 +18,13 @@ from framework.api.models.auth_models import (
     UserLoginRequest,
     UserRegisterRequest,
 )
+from framework.data.manager import TestDataManager
 from framework.utils.data_factory import DataFactory
 
 
 @allure.epic("API Contracts & Validation")
 @allure.feature("Authentication Schemas & Lifecycle")
+@pytest.mark.unit
 @pytest.mark.api
 class TestAuthAPIContract:
     """Contract tests for User and Authentication Pydantic v2 models."""
@@ -84,7 +86,7 @@ class TestAuthAPIContract:
                     "created_at": "2026-08-30T12:00:00Z",
                 },
             }
-            auth_resp = AuthResponse(**raw_response)
+            auth_resp = AuthResponse.model_validate(raw_response)
             assert auth_resp.token.startswith("eyJ")
             assert auth_resp.user.id == 10
             assert auth_resp.user.role == "customer"
@@ -92,24 +94,29 @@ class TestAuthAPIContract:
 
 @allure.epic("API Contracts & Validation")
 @allure.feature("Live Authentication Integration")
+@pytest.mark.integration
 @pytest.mark.api
 class TestAuthAPIIntegration:
     """Integration tests executing HTTP calls against the backend."""
 
     @allure.story("Full Register -> Login -> Profile Flow")
     @allure.severity(allure.severity_level.CRITICAL)
-    def test_user_registration_and_login_flow(self, auth_api: AuthAPI, data_factory: DataFactory):
+    def test_user_registration_and_login_flow(
+        self,
+        auth_api: AuthAPI,
+        data_factory: DataFactory,
+        test_data_manager: TestDataManager,
+        backend_health: dict[str, str],
+    ):
         """Tests registration -> login -> profile verification lifecycle."""
+        del backend_health
         user_data = data_factory.random_user()
 
         with allure.step("Execute POST /api/v1/auth/register"):
             register_res = auth_api.register(UserRegisterRequest(**user_data))
-            if not register_res.is_success and register_res.status_code != 201:
-                pytest.skip(
-                    "Backend API on port 3000 not reachable in standalone test environment."
-                )
-
-            assert register_res.status_code in [200, 201]
+            assert register_res.status_code in [200, 201], register_res.text
+            reg_auth = AuthResponse.model_validate(register_res.json())
+            test_data_manager.register_user_for_cleanup(reg_auth.user.id, reg_auth.token)
 
         with allure.step("Execute POST /api/v1/auth/login"):
             login_payload = UserLoginRequest(

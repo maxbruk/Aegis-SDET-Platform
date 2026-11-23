@@ -8,12 +8,15 @@
 =========================================================
 """
 
+import re
+import time
+
 import allure
 import pytest
 from playwright.sync_api import expect
 
 from framework.pages.storefront_page import StorefrontPage
-from framework.utils.chaos_network import ChaosNetworkInjector
+from framework.quality.network import ChaosNetworkInjector
 
 
 @allure.epic("Resilience & Chaos Engineering")
@@ -47,8 +50,12 @@ class TestNetworkChaos:
             storefront_page.checkout_modal.fill_address("1 Infinite Loop, Cupertino, CA")
             storefront_page.checkout_modal.submit_order()
 
-        with allure.step("Assert error banner appears without crash"):
+        with allure.step("Assert error banner appears, cart preserved, and submit stays enabled"):
             expect(storefront_page.checkout_modal.error_banner).to_be_visible()
+            err_text = storefront_page.checkout_modal.error_banner.inner_text().strip()
+            assert len(err_text) > 0
+            expect(storefront_page.header.cart_count_badge).to_have_text("1")
+            expect(storefront_page.checkout_modal.place_order_btn).to_be_enabled()
 
     @allure.story("HTTP 429 Rate Limiting Backoff")
     @allure.severity(allure.severity_level.CRITICAL)
@@ -67,6 +74,9 @@ class TestNetworkChaos:
 
         with allure.step("Assert rate limit error banner is displayed"):
             expect(storefront_page.auth_modal.error_banner).to_be_visible()
+            expect(storefront_page.auth_modal.error_banner).to_contain_text(
+                re.compile(r"rate limit", re.IGNORECASE)
+            )
 
     @allure.story("Browser Offline Network Mode")
     @allure.severity(allure.severity_level.CRITICAL)
@@ -87,3 +97,25 @@ class TestNetworkChaos:
             chaos_injector.set_offline_mode(False)
             storefront_page.evaluate_js("window.dispatchEvent(new Event('online'))")
             expect(storefront_page.offline_banner).to_be_hidden()
+
+    @allure.story("Network Latency Injection & Selective Fault Cleanup")
+    @allure.severity(allure.severity_level.NORMAL)
+    @pytest.mark.slow
+    def test_simulated_network_latency_and_fault_cleanup(
+        self,
+        storefront_page: StorefrontPage,
+        chaos_injector: ChaosNetworkInjector,
+    ) -> None:
+        """Verify latency fault injection works and clear_faults preserves mocked API routes."""
+        chaos_injector.inject_latency("**/api/v1/auth/login", delay_seconds=0.15)
+        storefront_page.header.open_auth_modal()
+        started = time.monotonic()
+        storefront_page.auth_modal.login("customer@example.com", "SecurePass!123")
+        expect(storefront_page.header.user_menu).to_be_visible()
+        elapsed = time.monotonic() - started
+        assert elapsed >= 0.12, f"Expected injected latency >= 0.12s, measured {elapsed:.3f}s"
+
+        # Clearing injected faults must keep underlying mocked_page routes working
+        chaos_injector.clear_faults()
+        storefront_page.header.logout()
+        expect(storefront_page.header.auth_open_btn).to_be_visible()

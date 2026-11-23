@@ -22,6 +22,7 @@ from framework.api.products_api import ProductsAPI
 
 @allure.epic("API Contracts & Validation")
 @allure.feature("Product Catalog Schemas")
+@pytest.mark.unit
 @pytest.mark.api
 class TestProductAPIContract:
     """Contract tests for Product DTOs and validation schemas."""
@@ -39,7 +40,7 @@ class TestProductAPIContract:
                 "stock": 15,
                 "category": "Electronics",
             }
-            product = ProductDTO(**product_data)
+            product = ProductDTO.model_validate(product_data)
             assert product.id == 1
             assert product.price == 149.99
             assert product.stock == 15
@@ -56,7 +57,7 @@ class TestProductAPIContract:
                 "stock": 100,
                 "category": "Accessories",
             }
-            model = ProductCreateRequest(**valid_payload)
+            model = ProductCreateRequest.model_validate(valid_payload)
             assert model.price == 34.50
 
         with (
@@ -99,26 +100,29 @@ class TestProductAPIContract:
                 "page": 1,
                 "limit": 20,
             }
-            resp = ProductListResponse(**raw_list)
+            resp = ProductListResponse.model_validate(raw_list)
             assert len(resp.products) == 2
             assert resp.products[0].name == "Item A"
 
 
 @allure.epic("API Contracts & Validation")
 @allure.feature("Product Catalog Integration")
+@pytest.mark.integration
 @pytest.mark.api
 class TestProductAPIIntegration:
     """Integration tests calling the Product API."""
 
     @allure.story("List Products HTTP Endpoint")
     @allure.severity(allure.severity_level.CRITICAL)
-    def test_list_products_endpoint(self, products_api: ProductsAPI):
+    def test_list_products_endpoint(
+        self,
+        products_api: ProductsAPI,
+        backend_health: dict[str, str],
+    ):
         """Fetches product listing from API and verifies response format."""
+        del backend_health
         with allure.step("GET /api/v1/products"):
             res = products_api.list_products()
-            if not res.is_success:
-                pytest.skip("Backend API on port 3000 not running.")
-
-            assert res.status_code == 200
-            data = res.json()
-            assert "products" in data or "data" in data or isinstance(data, list)
+            assert res.status_code == 200, res.text
+            parsed = ProductListResponse.model_validate(res.json())
+            assert len(parsed.products) >= 6

@@ -1,439 +1,236 @@
-"""
-=========================================================
- Python SDET Enterprise Automation Platform & Storefront
- End-to-End Quality Engineering with Playwright & Pytest
- COM Architecture, Network Chaos, CDP Metrics & Allure
+"""AEGIS Pytest configuration entrypoint: exposes modular fixtures and lifecycle hooks."""
 
- Developed by Max Bruk, August 2026
-=========================================================
-"""
+from __future__ import annotations
 
-import http.server
-import json
 import os
-import socketserver
-import threading
 import time
-from collections.abc import Generator
+from datetime import UTC, datetime
+from typing import Literal
 
 import pytest
-from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_playwright
 
-from framework.api.auth_api import AuthAPI
-from framework.api.cart_api import CartAPI
-from framework.api.client import BaseAPIClient
-from framework.api.orders_api import OrdersAPI
-from framework.api.products_api import ProductsAPI
+from framework.artifacts.manager import ArtifactManager
 from framework.config.settings import settings
-from framework.pages.storefront_page import StorefrontPage
-from framework.utils.a11y_auditor import AccessibilityAuditor
-from framework.utils.cdp_metrics import CDPTelemetryCollector
-from framework.utils.chaos_network import ChaosNetworkInjector
-from framework.utils.data_factory import DataFactory
-from framework.utils.visual_differ import VisualDiffer
+from framework.execution.metadata import ExecutionMetadata
+from framework.execution.run_context import RunContext
+from framework.telemetry.reliability import (
+    ReliabilityAnalyzer,
+    TestExecutionRecord,
+    resolve_git_sha,
+)
+from tests.fixtures.api import (
+    api_client,
+    auth_api,
+    backend_health,
+    cart_api,
+    orders_api,
+    products_api,
+)
+from tests.fixtures.authentication import (
+    admin_page,
+    authenticated_page,
+    mocked_admin_page,
+    mocked_authenticated_page,
+)
+from tests.fixtures.browser import (
+    artifact_manager,
+    browser,
+    console_collector,
+    context,
+    integration_page,
+    integration_storefront_page,
+    mocked_page,
+    mocked_storefront_page,
+    network_collector,
+    page,
+    playwright_instance,
+    run_context,
+    storefront_page,
+)
+from tests.fixtures.quality_tools import (
+    axe_auditor,
+    cdp_collector,
+    chaos_injector,
+    data_factory,
+    test_data_manager,
+    visual_checker,
+)
+from tests.fixtures.server import live_server
+from tests.support.artifact_helpers import collect_test_failure_artifacts
 
-# ============================================================================
-# Frontend HTTP Server (Serving ./frontend directory for UI tests)
-# ============================================================================
-
-
-class DualModeHTTPHandler(http.server.SimpleHTTPRequestHandler):
-    """Serves files from the frontend directory with CORS headers and proper MIME types."""
-
-    def __init__(self, *args, **kwargs):
-        frontend_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
-        super().__init__(*args, directory=frontend_dir, **kwargs)
-
-    def end_headers(self):
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "*")
-        super().end_headers()
-
-    def log_message(self, format, *args):
-        # Silence standard HTTP server access logs in pytest output
-        pass
-
-
-@pytest.fixture(scope="session", autouse=True)
-def live_server():
-    """Starts the frontend static server on an available port."""
-    host = "127.0.0.1"
-
-    server = socketserver.TCPServer((host, 0), DualModeHTTPHandler)
-    server.allow_reuse_address = True
-    assigned_port = server.server_address[1]
-
-    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
-    server_thread.start()
-
-    time.sleep(0.1)  # Brief pause to ensure socket is bound
-    server_url = f"http://{host}:{assigned_port}"
-    yield server_url
-    server.shutdown()
-    server.server_close()
-
-
-# ============================================================================
-# Playwright Browser and Context Lifecycle Fixtures
-# ============================================================================
-
-
-@pytest.fixture(scope="session")
-def playwright_instance() -> Generator[Playwright, None, None]:
-    with sync_playwright() as p:
-        yield p
-
-
-@pytest.fixture(scope="session")
-def browser(playwright_instance: Playwright) -> Generator[Browser, None, None]:
-    browser_type = getattr(playwright_instance, settings.BROWSER_NAME)
-    browser = browser_type.launch(
-        headless=settings.HEADLESS,
-        slow_mo=settings.SLOW_MO_MS,
-    )
-    yield browser
-    browser.close()
-
-
-@pytest.fixture(scope="function")
-def context(browser: Browser) -> Generator[BrowserContext, None, None]:
-    os.makedirs(settings.ARTIFACTS_DIR, exist_ok=True)
-    ctx = browser.new_context(
-        viewport={"width": settings.VIEWPORT_WIDTH, "height": settings.VIEWPORT_HEIGHT},
-        record_video_dir=settings.ARTIFACTS_DIR if settings.CAPTURE_TRACE_ON_FAILURE else None,
-    )
-    ctx.set_default_timeout(settings.DEFAULT_TIMEOUT_MS)
-    yield ctx
-    ctx.close()
+__all__ = [
+    "admin_page",
+    "api_client",
+    "artifact_manager",
+    "auth_api",
+    "authenticated_page",
+    "axe_auditor",
+    "backend_health",
+    "browser",
+    "cart_api",
+    "cdp_collector",
+    "chaos_injector",
+    "console_collector",
+    "context",
+    "data_factory",
+    "integration_page",
+    "integration_storefront_page",
+    "live_server",
+    "mocked_admin_page",
+    "mocked_authenticated_page",
+    "mocked_page",
+    "mocked_storefront_page",
+    "network_collector",
+    "orders_api",
+    "page",
+    "playwright_instance",
+    "products_api",
+    "run_context",
+    "storefront_page",
+    "test_data_manager",
+    "visual_checker",
+]
 
 
-def _setup_default_browser_routes(p: Page) -> None:
-    """Sets up deterministic mock routes for backend API calls when testing UI without live backend dependencies."""
-    p.route(
-        "**/api/v1/auth/login",
-        lambda route: (
-            route.fulfill(
-                status=200,
-                content_type="application/json",
-                body=json.dumps(
-                    {
-                        "token": "fast-track-login-token",
-                        "user": {
-                            "id": 101,
-                            "name": "Customer User",
-                            "email": "customer@example.com",
-                            "role": "customer",
-                        },
-                    }
-                ),
-            )
-            if route.request.method == "POST"
-            else route.continue_()
-        ),
-    )
-    p.route(
-        "**/api/v1/auth/register",
-        lambda route: (
-            route.fulfill(
-                status=200,
-                content_type="application/json",
-                body=json.dumps(
-                    {
-                        "token": "fast-track-register-token",
-                        "user": {
-                            "id": 102,
-                            "name": "Registered Customer",
-                            "email": "customer@example.com",
-                            "role": "customer",
-                        },
-                    }
-                ),
-            )
-            if route.request.method == "POST"
-            else route.continue_()
-        ),
-    )
-    p.route(
-        "**/api/v1/orders/checkout",
-        lambda route: (
-            route.fulfill(
-                status=200,
-                content_type="application/json",
-                body=json.dumps(
-                    {
-                        "id": 901,
-                        "order_id": "ORD-771122",
-                        "user_id": 42,
-                        "status": "confirmed",
-                        "total_amount": 161.99,
-                        "items_count": 1,
-                    }
-                ),
-            )
-            if route.request.method == "POST"
-            else route.continue_()
-        ),
-    )
-    p.route(
-        "**/health",
-        lambda route: (
-            route.fulfill(
-                status=200,
-                content_type="application/json",
-                body=json.dumps({"status": "healthy", "database": "healthy"}),
-            )
-            if route.request.method == "GET"
-            else route.continue_()
-        ),
-    )
-    p.route(
-        "**/api/v1/products",
-        lambda route: (
-            route.fulfill(
-                status=200,
-                content_type="application/json",
-                body=json.dumps(
-                    {
-                        "data": [
-                            {
-                                "id": 1,
-                                "name": "Apex Pro Mechanical Keyboard",
-                                "category": "Electronics",
-                                "price": 149.99,
-                                "stock": 15,
-                                "description": "Aircraft-grade aluminum frame, hot-swappable tactile switches, and PBT double-shot keycaps.",
-                            },
-                            {
-                                "id": 2,
-                                "name": "Precision Ergonomic Mouse",
-                                "category": "Electronics",
-                                "price": 79.99,
-                                "stock": 24,
-                                "description": "4000 DPI optical sensor, ultra-low latency wireless, and contoured thumb rest.",
-                            },
-                            {
-                                "id": 3,
-                                "name": "Studio Reference Headphones",
-                                "category": "Audio",
-                                "price": 249.99,
-                                "stock": 8,
-                                "description": "Open-back planar magnetic drivers delivering ultra-wide soundstage and neutral frequency response.",
-                            },
-                            {
-                                "id": 4,
-                                "name": "USB-C Braided Thunderbolt Cable",
-                                "category": "Accessories",
-                                "price": 29.99,
-                                "stock": 50,
-                                "description": "40Gbps data throughput and 100W Power Delivery with reinforced nylon braiding.",
-                            },
-                            {
-                                "id": 5,
-                                "name": "Solid Walnut Desk Mat (Extended)",
-                                "category": "Workspace",
-                                "price": 64.99,
-                                "stock": 12,
-                                "description": "Eco-friendly natural wool felt top with non-slip cork base and beveled edge detailing.",
-                            },
-                            {
-                                "id": 6,
-                                "name": "Ultra-Fast NVMe SSD Enclosure",
-                                "category": "Electronics",
-                                "price": 54.99,
-                                "stock": 18,
-                                "description": "Tool-free aluminum thermal enclosure supporting up to 10Gbps USB 3.2 Gen 2 transfer speeds.",
-                            },
-                        ],
-                        "total": 6,
-                        "page": 1,
-                        "limit": 10,
-                    }
-                ),
-            )
-            if route.request.method == "GET"
-            else route.continue_()
-        ),
+_IS_CONTROLLER = True
+_RECORDED_NODES: dict[str, str] = {}
+
+
+def _is_collect_or_help(config: pytest.Config) -> bool:
+    return bool(
+        getattr(config.option, "collectonly", False) or getattr(config.option, "help", False)
     )
 
 
-@pytest.fixture(scope="function")
-def page(context: BrowserContext, live_server: str) -> Generator[Page, None, None]:
-    p = context.new_page()
-    _setup_default_browser_routes(p)
-    yield p
-    p.close()
+@pytest.hookimpl(tryfirst=True)
+def pytest_configure(config: pytest.Config) -> None:
+    global _IS_CONTROLLER
+    workerinput = getattr(config, "workerinput", None)
+    if workerinput and "aegis_run_id" in workerinput:
+        _IS_CONTROLLER = False
+        os.environ["AEGIS_RUN_ID"] = workerinput["aegis_run_id"]
+    else:
+        _IS_CONTROLLER = True
+        _RECORDED_NODES.clear()
+        if _is_collect_or_help(config):
+            return
+        run_id = RunContext.resolve_run_id()
+        run_ctx = RunContext(run_id=run_id)
+        ArtifactManager(run_ctx).prepare_run_directory()
+        if not getattr(config.option, "xmlpath", None):
+            config.option.xmlpath = str(run_ctx.run_dir / "junit.xml")
+        config._aegis_started_at = datetime.now(UTC).isoformat()  # type: ignore[attr-defined]
+        config._aegis_start_perf = time.perf_counter()  # type: ignore[attr-defined]
 
 
-@pytest.fixture(scope="function")
-def storefront_page(page: Page, live_server: str) -> StorefrontPage:
-    sp = StorefrontPage(page, live_server)
-    sp.open()
-    return sp
-
-
-# ============================================================================
-# Fast-Track Pre-Authenticated Sessions (storageState pattern)
-# ============================================================================
-
-
-@pytest.fixture(scope="function")
-def authenticated_page(context: BrowserContext, live_server: str) -> Generator[Page, None, None]:
-    """Provides a Playwright page pre-authenticated as a customer without UI login overhead."""
-    user_data = {
-        "id": 42,
-        "name": "Alex Taylor",
-        "email": "customer@example.com",
-        "role": "customer",
-        "token": "fast-track-customer-jwt-token",
-    }
-
-    # Pre-inject authentication state into the browser context
-    p = context.new_page()
-    _setup_default_browser_routes(p)
-    p.goto(live_server, wait_until="domcontentloaded")
-
-    p.evaluate(
-        """
-        (user) => {
-            localStorage.setItem('apex_user', JSON.stringify(user));
-            document.cookie = `apex_token=${user.token}; path=/; max-age=86400; SameSite=Lax`;
-            document.cookie = `apex_user=${encodeURIComponent(JSON.stringify(user))}; path=/; max-age=86400; SameSite=Lax`;
-        }
-    """,
-        user_data,
-    )
-
-    p.reload(wait_until="domcontentloaded")
-    yield p
-    p.close()
-
-
-@pytest.fixture(scope="function")
-def admin_page(context: BrowserContext, live_server: str) -> Generator[Page, None, None]:
-    """Provides a Playwright page pre-authenticated as an Admin with RBAC privileges."""
-    admin_data = {
-        "id": 1,
-        "name": "System Admin",
-        "email": "admin@example.com",
-        "role": "admin",
-        "token": "fast-track-admin-jwt-token",
-    }
-
-    p = context.new_page()
-    _setup_default_browser_routes(p)
-    p.goto(live_server, wait_until="domcontentloaded")
-
-    p.evaluate(
-        """
-        (admin) => {
-            localStorage.setItem('apex_user', JSON.stringify(admin));
-            document.cookie = `apex_token=${admin.token}; path=/; max-age=86400; SameSite=Lax`;
-            document.cookie = `apex_user=${encodeURIComponent(JSON.stringify(admin))}; path=/; max-age=86400; SameSite=Lax`;
-        }
-    """,
-        admin_data,
-    )
-
-    p.reload(wait_until="domcontentloaded")
-    yield p
-    p.close()
-
-
-# ============================================================================
-# API Client Fixtures
-# ============================================================================
-
-
-@pytest.fixture(scope="session")
-def api_client() -> Generator[BaseAPIClient, None, None]:
-    client = BaseAPIClient(base_url=settings.API_URL)
-    yield client
-    client.close()
-
-
-@pytest.fixture(scope="function")
-def auth_api(api_client: BaseAPIClient) -> AuthAPI:
-    return AuthAPI(api_client)
-
-
-@pytest.fixture(scope="function")
-def products_api(api_client: BaseAPIClient) -> ProductsAPI:
-    return ProductsAPI(api_client)
-
-
-@pytest.fixture(scope="function")
-def cart_api(api_client: BaseAPIClient) -> CartAPI:
-    return CartAPI(api_client)
-
-
-@pytest.fixture(scope="function")
-def orders_api(api_client: BaseAPIClient) -> OrdersAPI:
-    return OrdersAPI(api_client)
-
-
-# ============================================================================
-# Advanced SDET Utilities & Telemetry Fixtures
-# ============================================================================
-
-
-@pytest.fixture(scope="session")
-def data_factory() -> DataFactory:
-    return DataFactory()
-
-
-@pytest.fixture(scope="function")
-def cdp_collector(page: Page) -> CDPTelemetryCollector:
-    return CDPTelemetryCollector(page)
-
-
-@pytest.fixture(scope="function")
-def chaos_injector(page: Page) -> Generator[ChaosNetworkInjector, None, None]:
-    injector = ChaosNetworkInjector(page)
-    yield injector
-    injector.clear_faults()
-
-
-@pytest.fixture(scope="function")
-def axe_auditor(page: Page) -> AccessibilityAuditor:
-    return AccessibilityAuditor(page)
-
-
-@pytest.fixture(scope="session")
-def visual_checker() -> VisualDiffer:
-    return VisualDiffer()
-
-
-# ============================================================================
-# Pytest Hooks: Automatic Failure Screenshots and Reporting
-# ============================================================================
+def pytest_configure_node(node) -> None:
+    node.workerinput["aegis_run_id"] = RunContext.resolve_run_id()
 
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
 def pytest_runtest_makereport(item, call):
+    del call
     outcome = yield
     report = outcome.get_result()
 
-    if report.when == "call" and report.failed and settings.CAPTURE_SCREENSHOT_ON_FAILURE:
-        page_instance = (
-            item.funcargs.get("page")
-            or item.funcargs.get("authenticated_page")
-            or item.funcargs.get("admin_page")
-        )
-        if page_instance:
-            try:
-                os.makedirs(settings.ARTIFACTS_DIR, exist_ok=True)
-                screenshot_path = os.path.join(settings.ARTIFACTS_DIR, f"fail_{item.name}.png")
-                png_bytes = page_instance.screenshot(path=screenshot_path, full_page=True)
-                try:
-                    import allure
+    if report.when == "call" or (report.failed and report.when in ("setup", "teardown")):
+        failure_category: str | None = None
+        if report.failed:
+            _, failure_category = collect_test_failure_artifacts(
+                item, error_text=str(report.longrepr)
+            )
+        worker_id = os.environ.get("PYTEST_XDIST_WORKER", "main")
+        report.user_properties.append(("aegis_worker", worker_id))
+        if failure_category is not None:
+            report.user_properties.append(("aegis_failure_category", failure_category))
 
-                    allure.attach(
-                        png_bytes,
-                        name=f"Failure Screenshot ({item.name})",
-                        attachment_type=allure.attachment_type.PNG,
-                    )
-                except (ImportError, RuntimeError, TypeError, AttributeError):
-                    pass
-            except (OSError, RuntimeError):
-                pass
+
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    if not _IS_CONTROLLER:
+        return
+    is_setup_skip = report.when == "setup" and report.skipped
+    is_phase_failure = report.failed and report.when in ("setup", "teardown")
+    if report.when != "call" and not is_setup_skip and not is_phase_failure:
+        return
+
+    props = dict(report.user_properties)
+    worker = str(props.get("aegis_worker", "main"))
+    raw_cat = props.get("aegis_failure_category")
+    failure_category = str(raw_cat) if raw_cat is not None else None
+    status: Literal["passed", "failed", "skipped", "error"]
+    if report.skipped:
+        status = "skipped"
+    elif report.when in ("setup", "teardown") and report.failed:
+        status = "error"
+    elif report.passed:
+        status = "passed"
+    else:
+        status = "failed"
+
+    record = TestExecutionRecord(
+        test_id=report.nodeid,
+        run_id=RunContext.resolve_run_id(),
+        status=status,
+        duration_ms=round(report.duration * 1000.0, 2),
+        browser=settings.BROWSER_NAME,
+        environment=settings.ENVIRONMENT,
+        git_sha=resolve_git_sha(),
+        worker=worker,
+        failure_category=failure_category,
+    )
+
+    prev_status = _RECORDED_NODES.get(report.nodeid)
+    if prev_status is not None:
+        if report.when == "teardown" and report.failed and prev_status == "passed":
+            _RECORDED_NODES[report.nodeid] = "error"
+            ReliabilityAnalyzer().upsert_execution(record)
+        return
+
+    _RECORDED_NODES[report.nodeid] = status
+    ReliabilityAnalyzer().record_execution(record)
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    del exitstatus
+    if hasattr(session.config, "workerinput") or _is_collect_or_help(session.config):
+        return
+    started_at = getattr(session.config, "_aegis_started_at", datetime.now(UTC).isoformat())
+    start_perf = getattr(session.config, "_aegis_start_perf", time.perf_counter())
+    duration_ms = round((time.perf_counter() - start_perf) * 1000.0, 2)
+
+    reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+    if reporter:
+        failed_ids = {
+            r.nodeid for r in (reporter.stats.get("failed", []) + reporter.stats.get("error", []))
+        }
+        skipped_ids = {r.nodeid for r in reporter.stats.get("skipped", [])} - failed_ids
+        passed_ids = {r.nodeid for r in reporter.stats.get("passed", [])} - failed_ids - skipped_ids
+        passed = len(passed_ids)
+        failed = len(failed_ids)
+        skipped = len(skipped_ids)
+    else:
+        passed = failed = skipped = 0
+    total = passed + failed + skipped
+
+    workers = 1
+    numprocesses = getattr(session.config.option, "numprocesses", None)
+    if isinstance(numprocesses, int) and numprocesses > 0:
+        workers = numprocesses
+
+    run_ctx = RunContext()
+    metadata = ExecutionMetadata(
+        run_id=run_ctx.run_id,
+        environment=settings.ENVIRONMENT,
+        browser=settings.BROWSER_NAME,
+        workers=workers,
+        started_at=started_at,
+        finished_at=datetime.now(UTC).isoformat(),
+        duration_ms=duration_ms,
+        total_tests=total,
+        passed=passed,
+        failed=failed,
+        skipped=skipped,
+    )
+    metadata.save(run_ctx.metadata_path)
+    if total > 0:
+        ReliabilityAnalyzer().export_reports()

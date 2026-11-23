@@ -19,20 +19,21 @@ from framework.utils.data_factory import DataFactory
 @allure.epic("Order Checkout")
 @allure.feature("End-to-End Customer Checkout Journey")
 @pytest.mark.ui
+@pytest.mark.ui_mocked
 @pytest.mark.smoke
 class TestCheckoutE2E:
-    """Full End-to-End customer purchase funnel tests."""
+    """Mocked UI customer purchase funnel tests."""
 
     @allure.story("Full Customer Checkout Journey with Idempotency Key")
     @allure.severity(allure.severity_level.BLOCKER)
     def test_full_customer_checkout_journey(
         self,
-        authenticated_page: Page,
+        mocked_authenticated_page: Page,
         live_server: str,
         data_factory: DataFactory,
     ):
         """Exercises complete journey: browse -> add item -> open drawer -> checkout -> place order -> confirmation."""
-        storefront = StorefrontPage(authenticated_page, live_server)
+        storefront = StorefrontPage(mocked_authenticated_page, live_server)
 
         with allure.step("Step 1: Add product to cart"):
             product = storefront.get_product_card_by_id(1)

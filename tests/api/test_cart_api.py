@@ -21,6 +21,7 @@ from framework.api.models.cart_models import (
 
 @allure.epic("API Contracts & Validation")
 @allure.feature("Shopping Cart Schemas")
+@pytest.mark.unit
 @pytest.mark.api
 class TestCartAPIContract:
     """Contract and schema validation tests for Shopping Cart."""
@@ -74,7 +75,7 @@ class TestCartAPIContract:
                 "tax": 30.40,
                 "total": 410.37,
             }
-            cart = CartResponse(**raw_cart)
+            cart = CartResponse.model_validate(raw_cart)
             assert len(cart.items) == 2
             assert cart.items[0].product_id == 1
             assert cart.items[0].subtotal == 299.98
