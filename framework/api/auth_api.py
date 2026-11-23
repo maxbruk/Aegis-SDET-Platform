@@ -2,16 +2,6 @@
 
 from typing import Any
 
-"""
-=========================================================
- Python SDET Enterprise Automation Platform & Storefront
- End-to-End Quality Engineering with Playwright & Pytest
- COM Architecture, Network Chaos, CDP Metrics & Allure
-
- Developed by Max Bruk, August 2026
-=========================================================
-"""
-
 from framework.api.client import APIResponse, BaseAPIClient
 from framework.api.models.auth_models import (
     UserLoginRequest,
@@ -51,3 +41,7 @@ class AuthAPI:
     def get_me(self) -> APIResponse:
         """Get the authenticated user's profile."""
         return self.client.get("/api/v1/auth/me")
+
+    def delete_user(self, user_id: int) -> APIResponse:
+        """Delete an isolated test user account (Admin RBAC required)."""
+        return self.client.delete(f"/api/v1/users/{user_id}")

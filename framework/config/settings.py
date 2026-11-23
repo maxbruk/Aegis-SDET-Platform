@@ -1,13 +1,3 @@
-"""
-=========================================================
- Python SDET Enterprise Automation Platform & Storefront
- End-to-End Quality Engineering with Playwright & Pytest
- COM Architecture, Network Chaos, CDP Metrics & Allure
-
- Developed by Max Bruk, August 2026
-=========================================================
-"""
-
 """Framework configuration and environment settings."""
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -41,9 +31,18 @@ class Settings(BaseSettings):
     VIEWPORT_HEIGHT: int = 800
 
     # Test Infrastructure & Reporting
+    ENVIRONMENT: str = "local"
     CAPTURE_SCREENSHOT_ON_FAILURE: bool = True
     CAPTURE_TRACE_ON_FAILURE: bool = True
+    CAPTURE_VIDEO_ON_FAILURE: bool = False
+    UPDATE_VISUAL_BASELINES: bool = False
     ARTIFACTS_DIR: str = "reports/artifacts"
+    RUNS_DIR: str = "reports/runs"
+    RELIABILITY_DIR: str = "reports/reliability"
+    MAX_STORED_RUNS: int = 10
+    REQUIRE_BACKEND: bool = False
+    TEST_RUN_ID: str = "local"
+    AI_ENABLED: bool = True
 
 
 # Global singleton instance

@@ -9,8 +9,12 @@
 """
 
 import time
+from pathlib import Path
+from typing import Any
 
 from playwright.sync_api import Page
+
+from framework.config.settings import settings
 
 
 class BasePage:
@@ -42,10 +46,12 @@ class BasePage:
         return self.page.url
 
     def take_screenshot(self, name: str | None = None) -> bytes:
-        """Capture full-page screenshot for debugging or visual comparison."""
+        """Capture full-page screenshot into configured artifacts directory."""
         filename = f"screenshot_{int(time.time())}.png" if not name else f"{name}.png"
-        return self.page.screenshot(path=f"reports/artifacts/{filename}", full_page=True)
+        target = Path(settings.ARTIFACTS_DIR) / filename
+        target.parent.mkdir(parents=True, exist_ok=True)
+        return self.page.screenshot(path=str(target), full_page=True)
 
-    def evaluate_js(self, script: str) -> any:
+    def evaluate_js(self, script: str) -> Any:
         """Evaluate custom JavaScript in the browser context."""
         return self.page.evaluate(script)

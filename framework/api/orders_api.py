@@ -44,3 +44,7 @@ class OrdersAPI:
     def get_order(self, order_id: int) -> APIResponse:
         """Retrieve details for a single order."""
         return self.client.get(f"/api/v1/orders/{order_id}")
+
+    def delete_order(self, order_id: int) -> APIResponse:
+        """Delete an order by database ID (Admin or owning user)."""
+        return self.client.delete(f"/api/v1/orders/{order_id}")

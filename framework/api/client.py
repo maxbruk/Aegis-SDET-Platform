@@ -1,19 +1,21 @@
 """Base HTTP Client wrapper for API testing."""
 
-"""
-=========================================================
- Python SDET Enterprise Automation Platform & Storefront
- End-to-End Quality Engineering with Playwright & Pytest
- COM Architecture, Network Chaos, CDP Metrics & Allure
-
- Developed by Max Bruk, August 2026
-=========================================================
-"""
-
 import time
 from typing import Any
 
 import httpx
+
+
+class APIClientError(RuntimeError):
+    """Base error raised when an HTTP API transport call fails."""
+
+
+class APIConnectionError(APIClientError):
+    """Raised when the target API cannot be reached or returns a transport error."""
+
+
+class APITimeoutError(APIClientError):
+    """Raised when an API request exceeds the configured timeout."""
 
 
 class APIResponse:
@@ -43,12 +45,12 @@ class APIResponse:
 class BaseAPIClient:
     """Production-grade API Client with session persistence, auth headers, and metrics."""
 
-    def __init__(self, base_url: str):
+    def __init__(self, base_url: str, timeout: float = 5.0):
         self.base_url = base_url.rstrip("/")
         self.token: str | None = None
         self._client = httpx.Client(
             base_url=self.base_url,
-            timeout=2.0,
+            timeout=timeout,
             follow_redirects=True,
         )
 
@@ -92,14 +94,12 @@ class BaseAPIClient:
                 json=json_data,
                 headers=req_headers,
             )
-        except (httpx.ConnectError, httpx.TimeoutException, httpx.HTTPError):
-            elapsed_ms = (time.perf_counter() - start_time) * 1000.0
-            dummy_resp = httpx.Response(
-                status_code=503,
-                request=httpx.Request(method, f"{self.base_url}{url}"),
-                content=b'{"error": "Backend server not reachable", "code": "SERVICE_UNAVAILABLE"}',
-            )
-            return APIResponse(dummy_resp, elapsed_ms)
+        except httpx.TimeoutException as exc:
+            raise APITimeoutError(f"Request timed out: {method} {self.base_url}{url}") from exc
+        except httpx.HTTPError as exc:
+            raise APIConnectionError(
+                f"Transport error for {method} {self.base_url}{url}: {exc}"
+            ) from exc
 
         elapsed_ms = (time.perf_counter() - start_time) * 1000.0
         return APIResponse(response, elapsed_ms)

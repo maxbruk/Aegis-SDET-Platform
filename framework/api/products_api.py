@@ -31,7 +31,7 @@ class ProductsAPI:
         limit: int | None = None,
     ) -> APIResponse:
         """List products with optional filtering."""
-        params = {}
+        params: dict[str, Any] = {}
         if category:
             params["category"] = category
         if search:

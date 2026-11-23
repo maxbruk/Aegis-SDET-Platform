@@ -2,16 +2,6 @@
 
 from typing import Any
 
-"""
-=========================================================
- Python SDET Enterprise Automation Platform & Storefront
- End-to-End Quality Engineering with Playwright & Pytest
- COM Architecture, Network Chaos, CDP Metrics & Allure
-
- Developed by Max Bruk, August 2026
-=========================================================
-"""
-
 from framework.api.client import APIResponse, BaseAPIClient
 from framework.api.models.cart_models import (
     AddToCartRequest,

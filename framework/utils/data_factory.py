@@ -10,6 +10,7 @@
 
 import random
 import uuid
+from typing import Any
 
 from faker import Faker
 
@@ -41,7 +42,7 @@ class DataFactory:
         return DataFactory.random_shipping_address()
 
     @staticmethod
-    def random_product() -> dict[str, any]:
+    def random_product() -> dict[str, Any]:
         """Generate a random new product payload for admin tests."""
         categories = ["Electronics", "Accessories", "Audio", "Workspace"]
         return {
